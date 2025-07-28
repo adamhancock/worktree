@@ -1,8 +1,9 @@
 #!/usr/bin/env tsx
 import { $ } from 'zx';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { select, input } from '@inquirer/prompts';
+import { homedir } from 'os';
 
 $.verbose = false;
 
@@ -88,6 +89,56 @@ async function branchExists(branchName: string, type: 'local' | 'remote'): Promi
   }
 }
 
+async function updateClaudeConfig(worktreePath: string) {
+  const claudeConfigPath = join(homedir(), '.claude.json');
+  
+  if (!existsSync(claudeConfigPath)) {
+    console.log('Warning: ~/.claude.json not found, skipping MCP servers configuration');
+    return;
+  }
+  
+  try {
+    const config = JSON.parse(readFileSync(claudeConfigPath, 'utf-8'));
+    const sourceDir = process.cwd();
+    const absoluteWorktreePath = resolve(sourceDir, worktreePath);
+    
+    // Check if source directory has MCP servers configured
+    if (!config.projects?.[sourceDir]?.mcpServers) {
+      console.log('No MCP servers configured in source directory');
+      return;
+    }
+    
+    // Copy MCP servers configuration
+    if (!config.projects) {
+      config.projects = {};
+    }
+    
+    if (!config.projects[absoluteWorktreePath]) {
+      config.projects[absoluteWorktreePath] = {
+        allowedTools: [],
+        history: [],
+        mcpContextUris: [],
+        mcpServers: {},
+        enabledMcpjsonServers: [],
+        disabledMcpjsonServers: [],
+        hasTrustDialogAccepted: false,
+        projectOnboardingSeenCount: 0,
+        hasClaudeMdExternalIncludesApproved: false,
+        hasClaudeMdExternalIncludesWarningShown: false
+      };
+    }
+    
+    // Copy the MCP servers from source directory
+    config.projects[absoluteWorktreePath].mcpServers = { ...config.projects[sourceDir].mcpServers };
+    
+    // Write the updated configuration
+    writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
+    console.log('✅ Updated ~/.claude.json with MCP servers configuration');
+  } catch (err) {
+    console.error('Failed to update Claude configuration:', err);
+  }
+}
+
 async function createWorktree(branchName?: string) {
   // Check if we're in a git repository
   if (!await isGitRepository()) {
@@ -157,13 +208,31 @@ async function createWorktree(branchName?: string) {
     process.exit(1);
   }
 
-  // Navigate to the new worktree
+  // Set up branch tracking for the worktree
+  const currentDir = process.cwd();
+  process.chdir(worktreePath);
+  
   try {
-    process.chdir(worktreePath);
+    if (!await branchExists(selectedBranch, 'remote')) {
+      // For new branches, set upstream to track origin/main
+      console.log(`Setting upstream for new branch ${selectedBranch} to track origin/main`);
+      await $`git branch --set-upstream-to=origin/main ${selectedBranch}`;
+    } else {
+      // For existing remote branches, ensure tracking is set
+      console.log(`Setting upstream for ${selectedBranch} to track origin/${selectedBranch}`);
+      await $`git branch --set-upstream-to=origin/${selectedBranch} ${selectedBranch}`;
+    }
   } catch (err) {
-    console.error(`Failed to navigate to worktree directory: ${err instanceof Error ? err.message : String(err)}`);
-    process.exit(1);
+    console.log(`Warning: Could not set upstream tracking: ${err instanceof Error ? err.message : String(err)}`);
   }
+  
+  process.chdir(currentDir);
+
+  // Update Claude configuration with MCP servers
+  await updateClaudeConfig(worktreePath);
+
+  // Navigate to the new worktree (already changed during upstream setup)
+  // No need to change directory again
 
   // Copy .env files from the original directory
   console.log('Copying .env files...');

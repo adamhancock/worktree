@@ -9,7 +9,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "bin": {
-    "worktree": "./src/worktree.ts"
+    "wt-manager": "./src/worktree.ts"
   },
   "keywords": [],
   "author": "",
