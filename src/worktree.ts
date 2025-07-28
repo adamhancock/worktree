@@ -2,7 +2,7 @@
 import { $ } from 'zx';
 import { existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
-import { select } from '@inquirer/prompts';
+import { select, input } from '@inquirer/prompts';
 
 $.verbose = false;
 
@@ -31,13 +31,37 @@ async function getRemoteBranches(): Promise<string[]> {
 
 async function selectBranchInteractive(branches: string[]): Promise<string | null> {
   try {
-    const selected = await select({
-      message: 'Select a branch to create worktree:',
-      choices: branches.map(branch => ({
+    const CREATE_NEW = '+ Create new branch';
+    const choices = [
+      { name: CREATE_NEW, value: CREATE_NEW },
+      ...branches.map(branch => ({
         name: branch,
         value: branch
       }))
+    ];
+    
+    const selected = await select({
+      message: 'Select a branch to create worktree:',
+      choices
     });
+    
+    if (selected === CREATE_NEW) {
+      const branchName = await input({
+        message: 'Enter the new branch name:',
+        validate: (value) => {
+          if (!value.trim()) {
+            return 'Branch name cannot be empty';
+          }
+          if (branches.includes(value)) {
+            return 'Branch already exists';
+          }
+          return true;
+        }
+      });
+      console.log(`\nCreating new branch: ${branchName}`);
+      return branchName;
+    }
+    
     console.log(`\nSelected branch: ${selected}`);
     return selected;
   } catch (err) {
@@ -129,7 +153,7 @@ async function createWorktree(branchName?: string) {
       await $`git worktree add ${worktreePath} -b ${selectedBranch} origin/main`;
     }
   } catch (err) {
-    console.error(`Failed to create worktree: ${err.message}`);
+    console.error(`Failed to create worktree: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -137,7 +161,7 @@ async function createWorktree(branchName?: string) {
   try {
     process.chdir(worktreePath);
   } catch (err) {
-    console.error(`Failed to navigate to worktree directory: ${err.message}`);
+    console.error(`Failed to navigate to worktree directory: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
