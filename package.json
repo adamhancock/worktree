@@ -1,0 +1,27 @@
+{
+  "name": "worktree",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "worktree": "tsx src/worktree.ts",
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "worktree": "./src/worktree.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.13.1",
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "zx": "^8.7.1"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.7.1"
+  }
+}
