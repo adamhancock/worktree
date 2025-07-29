@@ -253,7 +253,8 @@ async function createWorktree(branchName?: string) {
 
   // Install dependencies
   console.log('Installing dependencies with pnpm...');
-  await $`pnpm install`;
+  // Use --frozen-lockfile to ensure consistent installs and faster installation
+  await $`pnpm install --frozen-lockfile`;
 
   // Build the project
   console.log('Building project with pnpm...');
