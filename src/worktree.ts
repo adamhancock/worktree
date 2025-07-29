@@ -226,7 +226,7 @@ async function createWorktree(branchName?: string) {
     console.log(`Warning: Could not set upstream tracking: ${err instanceof Error ? err.message : String(err)}`);
   }
   
-  process.chdir(currentDir);
+  // Stay in the worktree directory for subsequent operations
 
   // Update Claude configuration with MCP servers
   await updateClaudeConfig(worktreePath);
@@ -240,13 +240,14 @@ async function createWorktree(branchName?: string) {
   
   for (const envFile of envFiles) {
     const relativePath = envFile.replace(originalDir + '/', '');
-    const targetDir = join(process.cwd(), dirname(relativePath));
+    const targetPath = join(process.cwd(), relativePath);
+    const targetDir = dirname(targetPath);
     
     // Create directory structure if it doesn't exist
     await $`mkdir -p ${targetDir}`;
     
-    // Copy the file
-    await $`cp ${envFile} ${join(process.cwd(), relativePath)}`;
+    // Copy the file (we're already in the worktree directory)
+    await $`cp ${envFile} ${targetPath}`;
     console.log(`Copied: ${relativePath}`);
   }
 
