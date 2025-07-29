@@ -214,9 +214,9 @@ async function createWorktree(branchName?: string) {
   
   try {
     if (!await branchExists(selectedBranch, 'remote')) {
-      // For new branches, set upstream to track origin/main
-      console.log(`Setting upstream for new branch ${selectedBranch} to track origin/main`);
-      await $`git branch --set-upstream-to=origin/main ${selectedBranch}`;
+      // For new branches, push to remote and set upstream to track the new remote branch
+      console.log(`Pushing new branch ${selectedBranch} to remote and setting upstream`);
+      await $`git push -u origin ${selectedBranch}`;
     } else {
       // For existing remote branches, ensure tracking is set
       console.log(`Setting upstream for ${selectedBranch} to track origin/${selectedBranch}`);
