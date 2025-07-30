@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 import { $ } from 'zx';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
@@ -213,14 +213,12 @@ async function createWorktree(branchName?: string) {
   process.chdir(worktreePath);
   
   try {
-    if (!await branchExists(selectedBranch, 'remote')) {
-      // For new branches, push to remote and set upstream to track the new remote branch
-      console.log(`Pushing new branch ${selectedBranch} to remote and setting upstream`);
-      await $`git push -u origin ${selectedBranch}`;
-    } else {
+    if (await branchExists(selectedBranch, 'remote')) {
       // For existing remote branches, ensure tracking is set
       console.log(`Setting upstream for ${selectedBranch} to track origin/${selectedBranch}`);
       await $`git branch --set-upstream-to=origin/${selectedBranch} ${selectedBranch}`;
+    } else {
+      console.log(`New branch ${selectedBranch} created locally. Use 'git push -u origin ${selectedBranch}' to push when ready.`);
     }
   } catch (err) {
     console.log(`Warning: Could not set upstream tracking: ${err instanceof Error ? err.message : String(err)}`);
