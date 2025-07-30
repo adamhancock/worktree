@@ -89,6 +89,43 @@ async function branchExists(branchName: string, type: 'local' | 'remote'): Promi
   }
 }
 
+async function detectPackageManager(dir: string): Promise<string> {
+  if (existsSync(join(dir, 'pnpm-lock.yaml'))) {
+    return 'pnpm';
+  }
+  if (existsSync(join(dir, 'yarn.lock'))) {
+    return 'yarn';
+  }
+  if (existsSync(join(dir, 'package-lock.json'))) {
+    return 'npm';
+  }
+  if (existsSync(join(dir, 'bun.lockb'))) {
+    return 'bun';
+  }
+  return 'npm'; // default
+}
+
+async function installDependencies(packageManager: string) {
+  console.log(`Installing dependencies with ${packageManager}...`);
+  
+  switch (packageManager) {
+    case 'pnpm':
+      await $`pnpm install --frozen-lockfile`;
+      break;
+    case 'yarn':
+      await $`yarn install --frozen-lockfile`;
+      break;
+    case 'bun':
+      await $`bun install --frozen-lockfile`;
+      break;
+    case 'npm':
+    default:
+      await $`npm ci`;
+      break;
+  }
+}
+
+
 async function updateClaudeConfig(worktreePath: string) {
   const claudeConfigPath = join(homedir(), '.claude.json');
   
@@ -209,7 +246,6 @@ async function createWorktree(branchName?: string) {
   }
 
   // Set up branch tracking for the worktree
-  const currentDir = process.cwd();
   process.chdir(worktreePath);
   
   try {
@@ -249,14 +285,9 @@ async function createWorktree(branchName?: string) {
     console.log(`Copied: ${relativePath}`);
   }
 
-  // Install dependencies
-  console.log('Installing dependencies with pnpm...');
-  // Use --frozen-lockfile to ensure consistent installs and faster installation
-  await $`pnpm install --frozen-lockfile`;
-
-  // Build the project
-  console.log('Building project with pnpm...');
-  await $`pnpm build`;
+  // Detect package manager and install dependencies
+  const packageManager = await detectPackageManager(process.cwd());
+  await installDependencies(packageManager);
 
   // Open in VS Code
   const absoluteWorktreePath = resolve(originalDir, worktreePath);

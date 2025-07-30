@@ -1,7 +1,7 @@
 {
-  "name": "worktree",
+  "name": "@adamhancock/worktree",
   "version": "1.0.0",
-  "description": "",
+  "description": "Git worktree manager with branch selection, dependency installation, and VS Code integration",
   "main": "dist/worktree.js",
   "scripts": {
     "worktree": "tsx src/worktree.ts",
@@ -11,8 +11,8 @@
   "bin": {
     "worktree": "./dist/worktree.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["git", "worktree", "cli", "development", "branch-management"],
+  "author": "Adam Hancock",
   "license": "ISC",
   "packageManager": "pnpm@10.13.1",
   "devDependencies": {
