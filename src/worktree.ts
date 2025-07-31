@@ -325,7 +325,7 @@ async function createWorktree(branchName?: string) {
   const absoluteWorktreePath = resolve(originalDir, worktreePath);
   echo(chalk.blue(`Opening VS Code at: ${absoluteWorktreePath}`));
   try {
-    await $`code ${absoluteWorktreePath}`;
+    await $`code --fullscreen ${absoluteWorktreePath}`;
   } catch (err) {
     echo(chalk.yellow('Failed to open VS Code. You can manually open the project at:'), absoluteWorktreePath);
   }
