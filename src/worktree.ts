@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { $ } from 'zx';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { $, echo, chalk, fs, argv } from 'zx';
 import { join, dirname, resolve } from 'path';
 import { select, input } from '@inquirer/prompts';
 import { homedir } from 'os';
@@ -17,7 +16,7 @@ async function isGitRepository(): Promise<boolean> {
 }
 
 async function getRemoteBranches(): Promise<string[]> {
-  console.log('Fetching latest branches...');
+  echo(chalk.blue('Fetching latest branches...'));
   await $`git fetch origin`;
   
   const result = await $`git branch -r`;
@@ -59,14 +58,14 @@ async function selectBranchInteractive(branches: string[]): Promise<string | nul
           return true;
         }
       });
-      console.log(`\nCreating new branch: ${branchName}`);
+      echo(chalk.green(`\nCreating new branch: ${branchName}`));
       return branchName;
     }
     
-    console.log(`\nSelected branch: ${selected}`);
+    echo(chalk.cyan(`\nSelected branch: ${selected}`));
     return selected;
   } catch (err) {
-    console.log('\nCancelled');
+    echo('\nCancelled');
     return null;
   }
 }
@@ -90,23 +89,23 @@ async function branchExists(branchName: string, type: 'local' | 'remote'): Promi
 }
 
 async function detectPackageManager(dir: string): Promise<string> {
-  if (existsSync(join(dir, 'pnpm-lock.yaml'))) {
+  if (fs.existsSync(join(dir, 'pnpm-lock.yaml'))) {
     return 'pnpm';
   }
-  if (existsSync(join(dir, 'yarn.lock'))) {
+  if (fs.existsSync(join(dir, 'yarn.lock'))) {
     return 'yarn';
   }
-  if (existsSync(join(dir, 'package-lock.json'))) {
+  if (fs.existsSync(join(dir, 'package-lock.json'))) {
     return 'npm';
   }
-  if (existsSync(join(dir, 'bun.lockb'))) {
+  if (fs.existsSync(join(dir, 'bun.lockb'))) {
     return 'bun';
   }
   return 'npm'; // default
 }
 
 async function installDependencies(packageManager: string) {
-  console.log(`Installing dependencies with ${packageManager}...`);
+  echo(chalk.blue(`Installing dependencies with ${packageManager}...`));
   
   switch (packageManager) {
     case 'pnpm':
@@ -129,19 +128,19 @@ async function installDependencies(packageManager: string) {
 async function updateClaudeConfig(worktreePath: string) {
   const claudeConfigPath = join(homedir(), '.claude.json');
   
-  if (!existsSync(claudeConfigPath)) {
-    console.log('Warning: ~/.claude.json not found, skipping MCP servers configuration');
+  if (!fs.existsSync(claudeConfigPath)) {
+    echo(chalk.yellow('Warning: ~/.claude.json not found, skipping MCP servers configuration'));
     return;
   }
   
   try {
-    const config = JSON.parse(readFileSync(claudeConfigPath, 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
     const sourceDir = process.cwd();
     const absoluteWorktreePath = resolve(sourceDir, worktreePath);
     
     // Check if source directory has MCP servers configured
     if (!config.projects?.[sourceDir]?.mcpServers) {
-      console.log('No MCP servers configured in source directory');
+      echo('No MCP servers configured in source directory');
       return;
     }
     
@@ -169,17 +168,17 @@ async function updateClaudeConfig(worktreePath: string) {
     config.projects[absoluteWorktreePath].mcpServers = { ...config.projects[sourceDir].mcpServers };
     
     // Write the updated configuration
-    writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
-    console.log('✅ Updated ~/.claude.json with MCP servers configuration');
+    fs.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
+    echo(chalk.green('✅ Updated ~/.claude.json with MCP servers configuration'));
   } catch (err) {
-    console.error('Failed to update Claude configuration:', err);
+    echo(chalk.red('Failed to update Claude configuration:'), err);
   }
 }
 
 async function createWorktree(branchName?: string) {
   // Check if we're in a git repository
   if (!await isGitRepository()) {
-    console.error('Error: Not in a git repository');
+    echo(chalk.red('Error: Not in a git repository'));
     process.exit(1);
   }
 
@@ -190,7 +189,7 @@ async function createWorktree(branchName?: string) {
     const branches = await getRemoteBranches();
     
     if (branches.length === 0) {
-      console.error('No remote branches found');
+      echo(chalk.red('No remote branches found'));
       process.exit(1);
     }
 
@@ -207,12 +206,12 @@ async function createWorktree(branchName?: string) {
   const safeBranchName = selectedBranch.replace(/\//g, '-');
   const worktreePath = join('..', `assurix-${safeBranchName}`);
 
-  console.log(`Creating worktree for branch: ${selectedBranch}`);
-  console.log(`Worktree path: ${worktreePath}`);
+  echo(chalk.cyan(`Creating worktree for branch: ${selectedBranch}`));
+  echo(chalk.gray(`Worktree path: ${worktreePath}`));
 
   // Check if worktree directory already exists
-  if (existsSync(worktreePath)) {
-    console.error(`Error: Directory ${worktreePath} already exists`);
+  if (fs.existsSync(worktreePath)) {
+    echo(chalk.red(`Error: Directory ${worktreePath} already exists`));
     process.exit(1);
   }
 
@@ -220,28 +219,28 @@ async function createWorktree(branchName?: string) {
   const originalDir = process.cwd();
 
   // Fetch latest from origin (skip if it would cause conflicts)
-  console.log('Fetching latest from origin...');
+  echo(chalk.blue('Fetching latest from origin...'));
   try {
     await $`git fetch origin`;
   } catch (err) {
-    console.log('Warning: Could not fetch from origin (this is OK if main is checked out elsewhere)');
+    echo(chalk.yellow('Warning: Could not fetch from origin (this is OK if main is checked out elsewhere)'));
   }
 
   // Create the worktree with the appropriate branch
   try {
     if (await branchExists(selectedBranch, 'local')) {
-      console.log(`Creating worktree with existing local branch: ${selectedBranch}`);
+      echo(chalk.blue(`Creating worktree with existing local branch: ${selectedBranch}`));
       await $`git worktree add ${worktreePath} ${selectedBranch}`;
     } else if (await branchExists(selectedBranch, 'remote')) {
-      console.log(`Creating worktree from remote branch: ${selectedBranch}`);
+      echo(chalk.blue(`Creating worktree from remote branch: ${selectedBranch}`));
       await $`git worktree add ${worktreePath} -b ${selectedBranch} origin/${selectedBranch}`;
     } else {
-      console.log(`Creating worktree with new branch: ${selectedBranch}`);
+      echo(chalk.blue(`Creating worktree with new branch: ${selectedBranch}`));
       // Create new branch from origin/main to avoid checkout conflicts
       await $`git worktree add ${worktreePath} -b ${selectedBranch} origin/main`;
     }
   } catch (err) {
-    console.error(`Failed to create worktree: ${err instanceof Error ? err.message : String(err)}`);
+    echo(chalk.red(`Failed to create worktree: ${err instanceof Error ? err.message : String(err)}`));
     process.exit(1);
   }
 
@@ -251,13 +250,17 @@ async function createWorktree(branchName?: string) {
   try {
     if (await branchExists(selectedBranch, 'remote')) {
       // For existing remote branches, ensure tracking is set
-      console.log(`Setting upstream for ${selectedBranch} to track origin/${selectedBranch}`);
+      echo(chalk.blue(`Setting upstream for ${selectedBranch} to track origin/${selectedBranch}`));
       await $`git branch --set-upstream-to=origin/${selectedBranch} ${selectedBranch}`;
     } else {
-      console.log(`New branch ${selectedBranch} created locally. Use 'git push -u origin ${selectedBranch}' to push when ready.`);
+      // For new branches, set up push configuration to create upstream on first push
+      echo(chalk.blue(`New branch ${selectedBranch} created locally. Configuring to push to origin/${selectedBranch}`));
+      await $`git config branch.${selectedBranch}.remote origin`;
+      await $`git config branch.${selectedBranch}.merge refs/heads/${selectedBranch}`;
+      await $`git config push.default simple`;
     }
   } catch (err) {
-    console.log(`Warning: Could not set upstream tracking: ${err instanceof Error ? err.message : String(err)}`);
+    echo(chalk.yellow(`Warning: Could not set upstream tracking: ${err instanceof Error ? err.message : String(err)}`));
   }
   
   // Stay in the worktree directory for subsequent operations
@@ -269,7 +272,7 @@ async function createWorktree(branchName?: string) {
   // No need to change directory again
 
   // Copy .env files from the original directory
-  console.log('Copying .env files...');
+  echo(chalk.blue('Copying .env files...'));
   const envFiles = await findEnvFiles(originalDir);
   
   for (const envFile of envFiles) {
@@ -282,7 +285,7 @@ async function createWorktree(branchName?: string) {
     
     // Copy the file (we're already in the worktree directory)
     await $`cp ${envFile} ${targetPath}`;
-    console.log(`Copied: ${relativePath}`);
+    echo(chalk.green(`Copied: ${relativePath}`));
   }
 
   // Detect package manager and install dependencies
@@ -291,21 +294,21 @@ async function createWorktree(branchName?: string) {
 
   // Open in VS Code
   const absoluteWorktreePath = resolve(originalDir, worktreePath);
-  console.log(`Opening VS Code at: ${absoluteWorktreePath}`);
+  echo(chalk.blue(`Opening VS Code at: ${absoluteWorktreePath}`));
   try {
     await $`code ${absoluteWorktreePath}`;
   } catch (err) {
-    console.log('Failed to open VS Code. You can manually open the project at:', absoluteWorktreePath);
+    echo(chalk.yellow('Failed to open VS Code. You can manually open the project at:'), absoluteWorktreePath);
   }
 
-  console.log('✅ Worktree created successfully!');
-  console.log(`📁 Location: ${worktreePath}`);
-  console.log(`🌿 Branch: ${selectedBranch}`);
+  echo(chalk.green('✅ Worktree created successfully!'));
+  echo(chalk.cyan(`📁 Location: ${worktreePath}`));
+  echo(chalk.cyan(`🌿 Branch: ${selectedBranch}`));
 }
 
 // Main execution
-const branchName = process.argv[2];
+const branchName = argv._[0];
 createWorktree(branchName).catch(err => {
-  console.error('Error:', err.message);
+  echo(chalk.red('Error:'), err.message);
   process.exit(1);
 });
