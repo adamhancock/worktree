@@ -6,6 +6,65 @@ import { homedir } from 'os';
 
 $.verbose = false;
 
+interface WorktreeConfig {
+  vscode?: {
+    args?: string[];
+    command?: string;
+    open?: boolean;  // Whether to open VS Code at all
+  };
+  worktree?: {
+    prefix?: string;
+    location?: string;  // Custom location pattern, e.g., "../worktrees/{prefix}-{branch}"
+  };
+  git?: {
+    fetch?: boolean;  // Whether to fetch before creating worktree (default: true)
+    remote?: string;  // Remote name (default: "origin")
+    defaultBranch?: string;  // Default branch for new branches (default: "main")
+    pushNewBranches?: boolean;  // Auto-push new branches (default: false)
+  };
+  env?: {
+    copy?: boolean;  // Whether to copy env files (default: true)
+    patterns?: string[];  // Patterns for env files (default: [".env*"])
+    exclude?: string[];  // Patterns to exclude
+  };
+  packageManager?: {
+    install?: boolean;  // Whether to auto-install (default: true)
+    force?: 'npm' | 'yarn' | 'pnpm' | 'bun';  // Force specific package manager
+    command?: string;  // Custom install command
+  };
+  hooks?: {
+    postCreate?: string[];  // Commands to run after creation
+  };
+}
+
+async function loadConfig(): Promise<WorktreeConfig> {
+  const config: WorktreeConfig = {};
+  
+  // Look for config files in order of precedence
+  const configPaths = [
+    join(process.cwd(), '.worktreerc.json'),
+    join(process.cwd(), '.worktreerc'),
+    join(homedir(), '.worktreerc.json'),
+    join(homedir(), '.worktreerc')
+  ];
+  
+  for (const configPath of configPaths) {
+    if (fs.existsSync(configPath)) {
+      try {
+        const fileContent = fs.readFileSync(configPath, 'utf-8');
+        const parsedConfig = JSON.parse(fileContent);
+        Object.assign(config, parsedConfig);
+        echo(chalk.gray(`Loaded config from: ${configPath}`));
+        break;
+      } catch (err) {
+        echo(chalk.yellow(`Warning: Failed to parse config file ${configPath}`));
+      }
+    }
+  }
+  
+  return config;
+}
+
 async function configureShell() {
   try {
     await $`which zsh`;
@@ -26,15 +85,15 @@ async function isGitRepository(): Promise<boolean> {
   }
 }
 
-async function getRemoteBranches(): Promise<string[]> {
+async function getRemoteBranches(remote: string = 'origin'): Promise<string[]> {
   echo(chalk.blue('Fetching latest branches...'));
-  await $`git fetch origin`;
+  await $`git fetch ${remote}`;
   
   const result = await $`git branch -r`;
   const branches = result.stdout
     .split('\n')
     .filter(line => line.trim() && !line.includes('HEAD'))
-    .map(line => line.trim().replace('origin/', ''))
+    .map(line => line.trim().replace(`${remote}/`, ''))
     .sort();
   
   return branches;
@@ -81,17 +140,31 @@ async function selectBranchInteractive(branches: string[]): Promise<string | nul
   }
 }
 
-async function findEnvFiles(dir: string): Promise<string[]> {
-  const result = await $`find ${dir} -name ".env*" -type f`;
-  return result.stdout.split('\n').filter(Boolean);
+async function findEnvFiles(dir: string, patterns: string[] = ['.env*'], exclude: string[] = []): Promise<string[]> {
+  const findCommands = patterns.map(pattern => `-name "${pattern}"`).join(' -o ');
+  const result = await $`find ${dir} \\( ${findCommands} \\) -type f`;
+  let files = result.stdout.split('\n').filter(Boolean);
+  
+  // Apply exclusions
+  if (exclude.length > 0) {
+    files = files.filter(file => {
+      const filename = file.split('/').pop() || '';
+      return !exclude.some(pattern => {
+        const regex = new RegExp(pattern.replace('*', '.*'));
+        return regex.test(filename);
+      });
+    });
+  }
+  
+  return files;
 }
 
-async function branchExists(branchName: string, type: 'local' | 'remote'): Promise<boolean> {
+async function branchExists(branchName: string, type: 'local' | 'remote', remote: string = 'origin'): Promise<boolean> {
   try {
     if (type === 'local') {
       await $`git show-ref --verify --quiet refs/heads/${branchName}`;
     } else {
-      await $`git show-ref --verify --quiet refs/remotes/origin/${branchName}`;
+      await $`git show-ref --verify --quiet refs/remotes/${remote}/${branchName}`;
     }
     return true;
   } catch {
@@ -150,59 +223,13 @@ async function installDependencies(packageManager: string, workingDir?: string) 
 }
 
 
-async function updateClaudeConfig(worktreePath: string) {
-  const claudeConfigPath = join(homedir(), '.claude.json');
-  
-  if (!fs.existsSync(claudeConfigPath)) {
-    echo(chalk.yellow('Warning: ~/.claude.json not found, skipping MCP servers configuration'));
-    return;
-  }
-  
-  try {
-    const config = JSON.parse(fs.readFileSync(claudeConfigPath, 'utf-8'));
-    const sourceDir = process.cwd();
-    const absoluteWorktreePath = resolve(sourceDir, worktreePath);
-    
-    // Check if source directory has MCP servers configured
-    if (!config.projects?.[sourceDir]?.mcpServers) {
-      echo('No MCP servers configured in source directory');
-      return;
-    }
-    
-    // Copy MCP servers configuration
-    if (!config.projects) {
-      config.projects = {};
-    }
-    
-    if (!config.projects[absoluteWorktreePath]) {
-      config.projects[absoluteWorktreePath] = {
-        allowedTools: [],
-        history: [],
-        mcpContextUris: [],
-        mcpServers: {},
-        enabledMcpjsonServers: [],
-        disabledMcpjsonServers: [],
-        hasTrustDialogAccepted: false,
-        projectOnboardingSeenCount: 0,
-        hasClaudeMdExternalIncludesApproved: false,
-        hasClaudeMdExternalIncludesWarningShown: false
-      };
-    }
-    
-    // Copy the MCP servers from source directory
-    config.projects[absoluteWorktreePath].mcpServers = { ...config.projects[sourceDir].mcpServers };
-    
-    // Write the updated configuration
-    fs.writeFileSync(claudeConfigPath, JSON.stringify(config, null, 2));
-    echo(chalk.green('✅ Updated ~/.claude.json with MCP servers configuration'));
-  } catch (err) {
-    echo(chalk.red('Failed to update Claude configuration:'), err);
-  }
-}
 
 async function createWorktree(branchName?: string) {
   // Configure shell
   await configureShell();
+  
+  // Load configuration
+  const config = await loadConfig();
   
   // Check if we're in a git repository
   if (!await isGitRepository()) {
@@ -212,9 +239,12 @@ async function createWorktree(branchName?: string) {
 
   let selectedBranch: string;
 
+  const remote = config.git?.remote || 'origin';
+  const defaultBranch = config.git?.defaultBranch || 'main';
+
   // If no branch provided, show interactive selector
   if (!branchName) {
-    const branches = await getRemoteBranches();
+    const branches = await getRemoteBranches(remote);
     
     if (branches.length === 0) {
       echo(chalk.red('No remote branches found'));
@@ -232,7 +262,18 @@ async function createWorktree(branchName?: string) {
 
   // Replace forward slashes with hyphens for directory name
   const safeBranchName = selectedBranch.replace(/\//g, '-');
-  const worktreePath = join('..', `assurix-${safeBranchName}`);
+  const prefix = config.worktree?.prefix || 'assurix';
+  
+  // Use custom location pattern if provided
+  let worktreePath: string;
+  if (config.worktree?.location) {
+    worktreePath = config.worktree.location
+      .replace('{prefix}', prefix)
+      .replace('{branch}', safeBranchName)
+      .replace('{original-branch}', selectedBranch);
+  } else {
+    worktreePath = join('..', `${prefix}-${safeBranchName}`);
+  }
 
   echo(chalk.cyan(`Creating worktree for branch: ${selectedBranch}`));
   echo(chalk.gray(`Worktree path: ${worktreePath}`));
@@ -246,26 +287,28 @@ async function createWorktree(branchName?: string) {
   // Store the original directory
   const originalDir = process.cwd();
 
-  // Fetch latest from origin (skip if it would cause conflicts)
-  echo(chalk.blue('Fetching latest from origin...'));
-  try {
-    await $`git fetch origin`;
-  } catch (err) {
-    echo(chalk.yellow('Warning: Could not fetch from origin (this is OK if main is checked out elsewhere)'));
+  // Fetch latest from remote (skip if it would cause conflicts or disabled)
+  if (config.git?.fetch !== false) {
+    echo(chalk.blue(`Fetching latest from ${remote}...`));
+    try {
+      await $`git fetch ${remote}`;
+    } catch (err) {
+      echo(chalk.yellow(`Warning: Could not fetch from ${remote} (this is OK if ${defaultBranch} is checked out elsewhere)`));
+    }
   }
 
   // Create the worktree with the appropriate branch
   try {
-    if (await branchExists(selectedBranch, 'local')) {
+    if (await branchExists(selectedBranch, 'local', remote)) {
       echo(chalk.blue(`Creating worktree with existing local branch: ${selectedBranch}`));
       await $`git worktree add ${worktreePath} ${selectedBranch}`;
-    } else if (await branchExists(selectedBranch, 'remote')) {
+    } else if (await branchExists(selectedBranch, 'remote', remote)) {
       echo(chalk.blue(`Creating worktree from remote branch: ${selectedBranch}`));
-      await $`git worktree add ${worktreePath} -b ${selectedBranch} origin/${selectedBranch}`;
+      await $`git worktree add ${worktreePath} -b ${selectedBranch} ${remote}/${selectedBranch}`;
     } else {
       echo(chalk.blue(`Creating worktree with new branch: ${selectedBranch}`));
-      // Create new branch from origin/main to avoid checkout conflicts
-      await $`git worktree add ${worktreePath} -b ${selectedBranch} origin/main`;
+      // Create new branch from remote/defaultBranch to avoid checkout conflicts
+      await $`git worktree add ${worktreePath} -b ${selectedBranch} ${remote}/${defaultBranch}`;
     }
   } catch (err) {
     echo(chalk.red(`Failed to create worktree: ${err instanceof Error ? err.message : String(err)}`));
@@ -276,16 +319,27 @@ async function createWorktree(branchName?: string) {
   process.chdir(worktreePath);
   
   try {
-    if (await branchExists(selectedBranch, 'remote')) {
+    if (await branchExists(selectedBranch, 'remote', remote)) {
       // For existing remote branches, ensure tracking is set
-      echo(chalk.blue(`Setting upstream for ${selectedBranch} to track origin/${selectedBranch}`));
-      await $`git branch --set-upstream-to=origin/${selectedBranch} ${selectedBranch}`;
+      echo(chalk.blue(`Setting upstream for ${selectedBranch} to track ${remote}/${selectedBranch}`));
+      await $`git branch --set-upstream-to=${remote}/${selectedBranch} ${selectedBranch}`;
     } else {
-      // For new branches, set up push configuration to create upstream on first push
-      echo(chalk.blue(`New branch ${selectedBranch} created locally. Configuring to push to origin/${selectedBranch}`));
-      await $`git config branch.${selectedBranch}.remote origin`;
+      // For new branches, set up push configuration
+      echo(chalk.blue(`New branch ${selectedBranch} created locally. Configuring to push to ${remote}/${selectedBranch}`));
+      await $`git config branch.${selectedBranch}.remote ${remote}`;
       await $`git config branch.${selectedBranch}.merge refs/heads/${selectedBranch}`;
       await $`git config push.default simple`;
+      
+      // Auto-push new branches if configured
+      if (config.git?.pushNewBranches) {
+        echo(chalk.blue(`Pushing new branch to ${remote}...`));
+        try {
+          await $`git push -u ${remote} ${selectedBranch}`;
+          echo(chalk.green(`Successfully pushed ${selectedBranch} to ${remote}`));
+        } catch (err) {
+          echo(chalk.yellow(`Warning: Could not push new branch: ${err instanceof Error ? err.message : String(err)}`));
+        }
+      }
     }
   } catch (err) {
     echo(chalk.yellow(`Warning: Could not set upstream tracking: ${err instanceof Error ? err.message : String(err)}`));
@@ -293,41 +347,80 @@ async function createWorktree(branchName?: string) {
   
   // Stay in the worktree directory for subsequent operations
 
-  // Update Claude configuration with MCP servers
-  await updateClaudeConfig(worktreePath);
-
   // Navigate to the new worktree (already changed during upstream setup)
   // No need to change directory again
 
   // Copy .env files from the original directory
-  echo(chalk.blue('Copying .env files...'));
-  const envFiles = await findEnvFiles(originalDir);
-  
-  for (const envFile of envFiles) {
-    const relativePath = envFile.replace(originalDir + '/', '');
-    const targetPath = join(process.cwd(), relativePath);
-    const targetDir = dirname(targetPath);
+  if (config.env?.copy !== false) {
+    echo(chalk.blue('Copying .env files...'));
+    const patterns = config.env?.patterns || ['.env*'];
+    const exclude = config.env?.exclude || [];
+    const envFiles = await findEnvFiles(originalDir, patterns, exclude);
     
-    // Create directory structure if it doesn't exist
-    await $`mkdir -p ${targetDir}`;
-    
-    // Copy the file (we're already in the worktree directory)
-    await $`cp ${envFile} ${targetPath}`;
-    echo(chalk.green(`Copied: ${relativePath}`));
+    for (const envFile of envFiles) {
+      const relativePath = envFile.replace(originalDir + '/', '');
+      const targetPath = join(process.cwd(), relativePath);
+      const targetDir = dirname(targetPath);
+      
+      // Create directory structure if it doesn't exist
+      await $`mkdir -p ${targetDir}`;
+      
+      // Copy the file (we're already in the worktree directory)
+      await $`cp ${envFile} ${targetPath}`;
+      echo(chalk.green(`Copied: ${relativePath}`));
+    }
+  } else {
+    echo(chalk.gray('Skipping .env file copying (disabled in config)'));
   }
 
   // Detect package manager and install dependencies
-  echo(chalk.gray(`Current directory: ${process.cwd()}`));
-  const packageManager = await detectPackageManager(process.cwd());
-  await installDependencies(packageManager, process.cwd());
+  if (config.packageManager?.install !== false) {
+    echo(chalk.gray(`Current directory: ${process.cwd()}`));
+    const packageManager = config.packageManager?.force || await detectPackageManager(process.cwd());
+    
+    if (config.packageManager?.command) {
+      echo(chalk.blue(`Running custom install command: ${config.packageManager.command}`));
+      const originalVerbose = $.verbose;
+      $.verbose = true;
+      try {
+        await $`${config.packageManager.command.split(' ')}`;
+      } finally {
+        $.verbose = originalVerbose;
+      }
+    } else {
+      await installDependencies(packageManager, process.cwd());
+    }
+  } else {
+    echo(chalk.gray('Skipping dependency installation (disabled in config)'));
+  }
 
   // Open in VS Code
-  const absoluteWorktreePath = resolve(originalDir, worktreePath);
-  echo(chalk.blue(`Opening VS Code at: ${absoluteWorktreePath}`));
-  try {
-    await $`code --fullscreen ${absoluteWorktreePath}`;
-  } catch (err) {
-    echo(chalk.yellow('Failed to open VS Code. You can manually open the project at:'), absoluteWorktreePath);
+  if (config.vscode?.open !== false) {
+    const absoluteWorktreePath = resolve(originalDir, worktreePath);
+    echo(chalk.blue(`Opening VS Code at: ${absoluteWorktreePath}`));
+    try {
+      const vscodeCommand = config.vscode?.command || 'code';
+      const vscodeArgs = config.vscode?.args || [];
+      const command = [vscodeCommand, ...vscodeArgs, absoluteWorktreePath];
+      
+      await $`${command}`;
+    } catch (err) {
+      echo(chalk.yellow('Failed to open VS Code. You can manually open the project at:'), absoluteWorktreePath);
+    }
+  }
+
+  // Run post-create hooks
+  if (config.hooks?.postCreate && config.hooks.postCreate.length > 0) {
+    echo(chalk.blue('Running post-create hooks...'));
+    for (const hook of config.hooks.postCreate) {
+      echo(chalk.gray(`Running: ${hook}`));
+      try {
+        await $`${hook.split(' ')}`;
+      } catch (err) {
+        echo(chalk.yellow(`Warning: Hook failed: ${hook}`));
+        echo(chalk.yellow(`Error: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
   }
 
   echo(chalk.green('✅ Worktree created successfully!'));
