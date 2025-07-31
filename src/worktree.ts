@@ -141,22 +141,34 @@ async function selectBranchInteractive(branches: string[]): Promise<string | nul
 }
 
 async function findEnvFiles(dir: string, patterns: string[] = ['.env*'], exclude: string[] = []): Promise<string[]> {
-  const findCommands = patterns.map(pattern => `-name "${pattern}"`).join(' -o ');
-  const result = await $`find ${dir} \\( ${findCommands} \\) -type f`;
-  let files = result.stdout.split('\n').filter(Boolean);
+  let allFiles: string[] = [];
+  
+  // Execute find command for each pattern separately to avoid shell interpretation issues
+  for (const pattern of patterns) {
+    try {
+      const result = await $`find ${dir} -name ${pattern} -type f`;
+      const files = result.stdout.split('\n').filter(Boolean);
+      allFiles.push(...files);
+    } catch (err) {
+      // Pattern might not match any files, that's ok
+    }
+  }
+  
+  // Remove duplicates
+  allFiles = [...new Set(allFiles)];
   
   // Apply exclusions
   if (exclude.length > 0) {
-    files = files.filter(file => {
+    allFiles = allFiles.filter(file => {
       const filename = file.split('/').pop() || '';
       return !exclude.some(pattern => {
-        const regex = new RegExp(pattern.replace('*', '.*'));
+        const regex = new RegExp(pattern.replace(/\*/g, '.*'));
         return regex.test(filename);
       });
     });
   }
   
-  return files;
+  return allFiles;
 }
 
 async function branchExists(branchName: string, type: 'local' | 'remote', remote: string = 'origin'): Promise<boolean> {
