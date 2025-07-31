@@ -6,6 +6,17 @@ import { homedir } from 'os';
 
 $.verbose = false;
 
+async function configureShell() {
+  try {
+    await $`which zsh`;
+    $.shell = '/bin/zsh';
+    echo(chalk.gray('Using zsh shell'));
+  } catch {
+    $.shell = '/bin/bash';
+    echo(chalk.gray('Using bash shell (zsh not available)'));
+  }
+}
+
 async function isGitRepository(): Promise<boolean> {
   try {
     await $`git rev-parse --git-dir`;
@@ -104,23 +115,37 @@ async function detectPackageManager(dir: string): Promise<string> {
   return 'npm'; // default
 }
 
-async function installDependencies(packageManager: string) {
+async function installDependencies(packageManager: string, workingDir?: string) {
   echo(chalk.blue(`Installing dependencies with ${packageManager}...`));
   
-  switch (packageManager) {
-    case 'pnpm':
-      await $`pnpm install --frozen-lockfile`;
-      break;
-    case 'yarn':
-      await $`yarn install --frozen-lockfile`;
-      break;
-    case 'bun':
-      await $`bun install --frozen-lockfile`;
-      break;
-    case 'npm':
-    default:
-      await $`npm ci`;
-      break;
+  const originalVerbose = $.verbose;
+  const originalCwd = $.cwd;
+  $.verbose = true; // Show command output
+  
+  try {
+    if (workingDir) {
+      $.cwd = workingDir;
+    }
+    
+    await $`pwd`;
+    switch (packageManager) {
+      case 'pnpm':
+        await $`pnpm install --frozen-lockfile`;
+        break;
+      case 'yarn':
+        await $`yarn install --frozen-lockfile`;
+        break;
+      case 'bun':
+        await $`bun install --frozen-lockfile`;
+        break;
+      case 'npm':
+      default:
+        await $`npm ci`;
+        break;
+    }
+  } finally {
+    $.verbose = originalVerbose; // Restore original verbose setting
+    $.cwd = originalCwd; // Restore original working directory
   }
 }
 
@@ -176,6 +201,9 @@ async function updateClaudeConfig(worktreePath: string) {
 }
 
 async function createWorktree(branchName?: string) {
+  // Configure shell
+  await configureShell();
+  
   // Check if we're in a git repository
   if (!await isGitRepository()) {
     echo(chalk.red('Error: Not in a git repository'));
@@ -289,8 +317,9 @@ async function createWorktree(branchName?: string) {
   }
 
   // Detect package manager and install dependencies
+  echo(chalk.gray(`Current directory: ${process.cwd()}`));
   const packageManager = await detectPackageManager(process.cwd());
-  await installDependencies(packageManager);
+  await installDependencies(packageManager, process.cwd());
 
   // Open in VS Code
   const absoluteWorktreePath = resolve(originalDir, worktreePath);
